@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>koro-koro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            background: #0a0a1e;
+            color: #ffffff;
+            font-family: 'Roboto', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #game-canvas {
+            margin-top: 20px;
+            display: block;
+            border: 1px solid #4a4a8a;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+        #button-container {
+            margin-top: 15px;
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            background: linear-gradient(45deg, #2a2a4a, #3a3a6a);
+            color: #ffffff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 700;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: transform 0.2s ease, background 0.2s ease;
+        }
+        button:hover {
+            background: linear-gradient(45deg, #3a3a6a, #4a4a8a);
+            transform: scale(1.05);
+        }
+        button:disabled {
+            background: #2a2a4a;
+            color: #6a6a8a;
+            cursor: not-allowed;
+            transform: none;
+        }
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, #0a0a1e, #1a1a3e);
+            background-size: 200% 200%;
+            animation: gradientShift 20s ease infinite;
+            opacity: 0.3;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game-canvas"></canvas>
+    <div id="button-container">
+        <button id="back-btn" style="display: none;">Back</button>
+        <button id="restart-btn" style="display: none;">Restart</button>
+        <button id="prev-page-btn" style="display: none;">Prev</button>
+        <button id="next-page-btn" style="display: none;">Next</button>
+    </div>
+    <script>
+        "use strict";
+
+        const Settings = {
+            GENERATED_LEVEL_DIR: 'generated_levels',
+            CELL_SIZE: 60,
+            BUTTON_AREA_HEIGHT: 60,
+            BUTTON_SPACING: 15,
+            DEFAULT_SCREEN_WIDTH: 900,
+            DEFAULT_SCREEN_HEIGHT: 700,
+            SCREEN_WIDTH: 900,
+            SCREEN_HEIGHT: 700,
+            GRID_PADDING: 15,
+            BACKGROUND_COLOR: "#0a0a1e",
+            GRID_BACKGROUND_COLOR: "rgba(26, 26, 62, 0.9)",
+            LINE_COLOR: "#4a4a8a",
+            GRID_BORDER_COLOR: "#5a5a9a",
+            NUMBER_COLOR: "#ffffff",
+            TEXT_COLOR: "#ffffff",
+            TITLE_COLOR: "#ffffff",
+            METRICS_COLOR: "#e0e0e0",
+            BUTTON_COLOR: "#2a2a4a",
+            BUTTON_HOVER_COLOR: "#3a3a6a",
+            BUTTON_TEXT_COLOR: "#ffffff",
+            BUTTON_DISABLED_COLOR: "#2a2a4a",
+            INVALID_MOVE_COLOR: "rgba(255, 80, 80, 0.5)",
+            LEVEL_SOLVED_COLOR: "#4a4aff",
+            PATH_COLORS: [
+                "#4a4aff", "#ff4a4a", "#4affa4", "#ffa44a", "#a44aff",
+                "#4acaff", "#ff4ac2", "#4aff6a", "#ff6a4a", "#6a4aff",
+                "#4affca", "#ff4a8a", "#8affa4", "#4a8aff", "#ff8ac2"
+            ],
+            FONT_SIZE: 28,
+            LARGE_FONT_SIZE: 48,
+            BUTTON_FONT_SIZE: 16,
+            SMALL_FONT_SIZE: 16,
+            INVALID_MOVE_DURATION: 400,
+            PATH_LINE_WIDTH: 6,
+            LEVEL_SOLVED_DISPLAY_DURATION: 1500,
+            LEVEL_DIR: 'levels',
+            MIN_GRID_SIZE: 5,
+            MAX_GRID_SIZE_SELECT: 12,
+            SELECT_SCREEN_PADDING: 20,
+            SELECT_DEPOT_COLOR_UNSOLVED: "#2a2a4a",
+            SELECT_DEPOT_COLOR_SOLVED: "#4a4aff",
+            SELECT_DEPOT_TEXT_COLOR_UNSOLVED: "#e0e0e0",
+            SELECT_DEPOT_TEXT_COLOR_SOLVED: "#ffffff",
+            SELECT_GRID_BG_COLOR: "#1a1a3e",
+            SELECT_LINE_COLOR: "#4a4a8a",
+            BACK_BUTTON_WIDTH: 100,
+            BACK_BUTTON_HEIGHT: 40,
+            COOKIE_NAME: "PipeDreamProgress",
+            TITLE_BUTTON_WIDTH: 180,
+            TITLE_BUTTON_HEIGHT: 50,
+            TITLE_BUTTON_SPACING: 20,
+            DAILY_COOKIE_NAME: "PipeDreamDailyProgress",
+            LOGO_WIDTH: 280,
+            LOGO_HEIGHT: 140,
+            SIZE_CELL_SIZE: 70,
+            SIZE_CELL_SPACING: 8,
+            LEVEL_CELL_SIZE_MIN: 20,
+            LEVEL_CELL_SIZE_MAX: 50,
+            LEVEL_CELL_SPACING: 6,
+            LEVELS_PER_PAGE: 100
+        };
+
+        let canvas, ctx;
+        let gameState = "title_screen";
+        let levelsBySize = {};
+        let solvedLevels = {};
+        let currentGridSize = -1;
+        let currentLevelIndexInSize = -1;
+        let level = null;
+        let gridData = [];
+        let paths = {};
+        let drawingPath = false;
+        let currentPathDepotId = -1;
+        let currentPath = [];
+        let showInvalidMove = false;
+        let invalidMoveTimer = 0;
+        let invalidMovePos = null;
+        let levelSolved = false;
+        let levelSolvedTimer = 0;
+        let allLevelsComplete = false;
+        let isMouseDown = false;
+        let mousePos = { x: 0, y: 0 };
+        let logo = null;
+        let dailyLevels = [];
+        let currentDailyIndex = 0;
+        let dailyMode = false;
+        let dailyProgress = {};
+        let lastMouseDownTime = 0;
+        let particles = [];
+        let activeDepotPulse = 0;
+        let currentLevelPage = 0;
+
+        class Depot {
+            constructor(x, y, n, id = -1) {
+                this.x = x;
+                this.y = y;
+                this.n = n;
+                this.id = id;
+            }
+        }
+
+        class Level {
+            constructor(name, gridSize, depots, solution = null) {
+                this.name = name;
+                this.gridSize = gridSize;
+                this.depots = depots;
+                this.solution = solution;
+                this.indexInSize = -1;
+            }
+        }
+
+        function init() {
+            canvas = document.getElementById('game-canvas');
+            if (!canvas) { console.error("Canvas not found"); return; }
+            ctx = canvas.getContext('2d');
+            if (!ctx) { console.error("No 2D context"); return; }
+
+            canvas.width = Settings.SCREEN_WIDTH;
+            canvas.height = Settings.SCREEN_HEIGHT;
+            ctx.imageSmoothingEnabled = false;
+
+            loadLogo();
+            loadProgress();
+            processDefaultLevels();
+
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            window.addEventListener('resize', resizeCanvas);
+            window.addEventListener('keydown', handleKeyDown);
+
+            const backButton = document.getElementById('back-btn');
+            const restartButton = document.getElementById('restart-btn');
+            const prevPageButton = document.getElementById('prev-page-btn');
+            const nextPageButton = document.getElementById('next-page-btn');
+            if (backButton) backButton.addEventListener('click', handleBackButton);
+            if (restartButton) restartButton.addEventListener('click', handleRestartButton);
+            if (prevPageButton) prevPageButton.addEventListener('click', () => handlePageChange(-1));
+            if (nextPageButton) nextPageButton.addEventListener('click', () => handlePageChange(1));
+
+            updateButtonStates();
+            resizeCanvas();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function loadLogo() {
+            logo = new Image();
+            logo.src = 'PipeDream.svg';
+            logo.onerror = () => {
+                console.error("Failed to load logo");
+                logo = null;
+            };
+        }
+
+        function resizeCanvas() {
+            const maxHeight = window.innerHeight - 120;
+            canvas.width = Math.min(window.innerWidth - 20, Settings.DEFAULT_SCREEN_WIDTH);
+            canvas.height = Math.min(maxHeight, Settings.DEFAULT_SCREEN_HEIGHT);
+            Settings.SCREEN_WIDTH = canvas.width;
+            Settings.SCREEN_HEIGHT = canvas.height;
+            if (ctx) {
+                ctx.imageSmoothingEnabled = false;
+                draw();
+            }
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            const currentTime = Date.now();
+            if (showInvalidMove && (currentTime - invalidMoveTimer > Settings.INVALID_MOVE_DURATION)) {
+                showInvalidMove = false;
+                invalidMovePos = null;
+            }
+            if (levelSolved && gameState === 'level_solved') {
+                if (currentTime - levelSolvedTimer > Settings.LEVEL_SOLVED_DISPLAY_DURATION) {
+                    const nextLevelInfo = findNextUnsolvedLevel(currentGridSize, currentLevelIndexInSize);
+                    if (nextLevelInfo) {
+                        loadLevel(nextLevelInfo.size, nextLevelInfo.indexInSize);
+                    } else {
+                        gameState = "game_over";
+                        allLevelsComplete = true;
+                        levelSolved = false;
+                    }
+                }
+            }
+            updateParticles(currentTime);
+            activeDepotPulse = (activeDepotPulse + 0.05) % (Math.PI * 2);
+        }
+
+        function updateParticles(currentTime) {
+            particles = particles.filter(p => p.lifetime > 0);
+            particles.forEach(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.lifetime -= 16;
+                p.opacity = p.lifetime / p.maxLifetime;
+                p.size = Math.max(1, p.size * (p.lifetime / p.maxLifetime));
+            });
+        }
+
+        function draw() {
+            if (!ctx) return;
+            ctx.fillStyle = Settings.BACKGROUND_COLOR;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1.0;
+            switch (gameState) {
+                case "title_screen": drawTitleScreen(); break;
+                case "size_selection": drawSizeSelectionScreen(); break;
+                case "level_selection": drawLevelSelectionScreen(); break;
+                case "playing":
+                case "level_solved":
+                    if (level) {
+                        drawGameScreen();
+                        if (levelSolved) drawParticles();
+                    } else {
+                        drawError("No level loaded");
+                    }
+                    break;
+                case "game_over": drawAllCompleteScreen(); break;
+                default: drawError("Unknown game state");
+            }
+        }
+
+        function drawTitleScreen() {
+            if (logo && logo.complete) {
+                const logoX = (canvas.width - Settings.LOGO_WIDTH) / 2;
+                const logoY = canvas.height * 0.15;
+                ctx.globalAlpha = 0.9;
+                ctx.drawImage(logo, logoX, logoY, Settings.LOGO_WIDTH, Settings.LOGO_HEIGHT);
+                ctx.globalAlpha = 1.0;
+            } else {
+                ctx.fillStyle = Settings.TITLE_COLOR;
+                ctx.font = `bold ${Settings.LARGE_FONT_SIZE}px Roboto`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText("koro-koro", canvas.width / 2, canvas.height * 0.2);
+            }
+
+            if (Object.keys(levelsBySize).length === 0) {
+                ctx.fillStyle = Settings.TEXT_COLOR;
+                ctx.font = `${Settings.FONT_SIZE}px Roboto`;
+                ctx.fillText("Loading levels...", canvas.width / 2, canvas.height * 0.6);
+                return;
+            }
+
+            // Draw "Select Size" title
+            ctx.fillStyle = Settings.TITLE_COLOR;
+            ctx.font = `bold ${Math.floor(Settings.LARGE_FONT_SIZE * 0.7)}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("Select Size", canvas.width / 2, canvas.height * 0.4);
+
+            // Draw size selection grid directly on title screen
+            const gridRows = 2;
+            const gridCols = 4;
+            const cellSize = Settings.SIZE_CELL_SIZE;
+            const spacing = Settings.SIZE_CELL_SPACING;
+            const gridWidth = gridCols * cellSize + (gridCols - 1) * spacing;
+            const gridHeight = gridRows * cellSize + (gridRows - 1) * spacing;
+            const startX = (canvas.width - gridWidth) / 2;
+            const startY = canvas.height * 0.5;
+            const sizes = Array.from({length: Settings.MAX_GRID_SIZE_SELECT - Settings.MIN_GRID_SIZE + 1}, (_, i) => Settings.MIN_GRID_SIZE + i);
+
+            sizes.forEach((size, i) => {
+                const row = Math.floor(i / gridCols);
+                const col = i % gridCols;
+                const x = startX + col * (cellSize + spacing);
+                const y = startY + row * (cellSize + spacing);
+                const rect = { x, y, width: cellSize, height: cellSize, centerX: x + cellSize / 2, centerY: y + cellSize / 2 };
+                const sizeLabel = `${size}x${size}`;
+                const hasLevels = !!levelsBySize[size];
+                const depotColor = hasLevels ? Settings.SELECT_DEPOT_COLOR_UNSOLVED : Settings.BUTTON_DISABLED_COLOR;
+                const textColor = hasLevels ? Settings.BUTTON_TEXT_COLOR : Settings.SELECT_DEPOT_TEXT_COLOR_UNSOLVED;
+                drawSelectionCell(rect, sizeLabel, depotColor, textColor, isMouseOverButton(rect));
+            });
+        }
+
+        function drawSizeSelectionScreen() {
+            ctx.fillStyle = Settings.TITLE_COLOR;
+            ctx.font = `bold ${Settings.LARGE_FONT_SIZE}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("Select Size", canvas.width / 2, Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE / 2);
+
+            const gridRows = 2;
+            const gridCols = 4;
+            const cellSize = Settings.SIZE_CELL_SIZE;
+            const spacing = Settings.SIZE_CELL_SPACING;
+            const gridWidth = gridCols * cellSize + (gridCols - 1) * spacing;
+            const gridHeight = gridRows * cellSize + (gridRows - 1) * spacing;
+            const startX = (canvas.width - gridWidth) / 2;
+            const startY = Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE + 20;
+            const sizes = Array.from({length: Settings.MAX_GRID_SIZE_SELECT - Settings.MIN_GRID_SIZE + 1}, (_, i) => Settings.MIN_GRID_SIZE + i);
+
+            sizes.forEach((size, i) => {
+                const row = Math.floor(i / gridCols);
+                const col = i % gridCols;
+                const x = startX + col * (cellSize + spacing);
+                const y = startY + row * (cellSize + spacing);
+                const rect = { x, y, width: cellSize, height: cellSize, centerX: x + cellSize / 2, centerY: y + cellSize / 2 };
+                const sizeLabel = `${size}x${size}`;
+                const hasLevels = !!levelsBySize[size];
+                const depotColor = hasLevels ? Settings.SELECT_DEPOT_COLOR_UNSOLVED : Settings.BUTTON_DISABLED_COLOR;
+                const textColor = hasLevels ? Settings.BUTTON_TEXT_COLOR : Settings.SELECT_DEPOT_TEXT_COLOR_UNSOLVED;
+                drawSelectionCell(rect, sizeLabel, depotColor, textColor, isMouseOverButton(rect));
+            });
+        }
+
+        function drawLevelSelectionScreen() {
+            ctx.fillStyle = Settings.TITLE_COLOR;
+            ctx.font = `bold ${Settings.LARGE_FONT_SIZE}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${currentGridSize}x${currentGridSize} Levels`, canvas.width / 2, Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE / 2);
+
+            const levelsForThisSize = levelsBySize[currentGridSize] || [];
+            const totalLevels = levelsForThisSize.length;
+            const startIndex = currentLevelPage * Settings.LEVELS_PER_PAGE;
+            const endIndex = Math.min(startIndex + Settings.LEVELS_PER_PAGE, totalLevels);
+            const levelsToShow = levelsForThisSize.slice(startIndex, endIndex);
+
+            // Fix: Calculate grid dimensions dynamically based on number of levels to display
+            const gridCols = Math.min(10, Math.ceil(Math.sqrt(levelsToShow.length)));
+            const gridRows = Math.ceil(levelsToShow.length / gridCols);
+            
+            const availableHeight = canvas.height - (Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE + 20 + Settings.BACK_BUTTON_HEIGHT + 20);
+            const availableWidth = canvas.width - 2 * Settings.SELECT_SCREEN_PADDING;
+            
+            // Adjust cell size calculation 
+            const cellSize = Math.max(Settings.LEVEL_CELL_SIZE_MIN, Math.min(Settings.LEVEL_CELL_SIZE_MAX, Math.min(
+                availableWidth / gridCols,
+                availableHeight / gridRows
+            )));
+            
+            const spacing = Settings.LEVEL_CELL_SPACING;
+            const gridWidth = gridCols * cellSize + (gridCols - 1) * spacing;
+            const gridHeight = gridRows * cellSize + (gridRows - 1) * spacing;
+            const startX = (canvas.width - gridWidth) / 2;
+            const startY = Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE + 20;
+
+            levelsToShow.forEach((_, i) => {
+                const row = Math.floor(i / gridCols);
+                const col = i % gridCols;
+                const x = startX + col * (cellSize + spacing);
+                const y = startY + row * (cellSize + spacing);
+                const rect = { x, y, width: cellSize, height: cellSize, centerX: x + cellSize / 2, centerY: y + cellSize / 2 };
+                const levelIndex = startIndex + i;
+                const levelKey = `${currentGridSize}_${levelIndex}`;
+                const isSolved = !!solvedLevels[levelKey];
+                const depotColor = isSolved ? Settings.SELECT_DEPOT_COLOR_SOLVED : Settings.SELECT_DEPOT_COLOR_UNSOLVED;
+                const textColor = isSolved ? Settings.SELECT_DEPOT_TEXT_COLOR_SOLVED : Settings.BUTTON_TEXT_COLOR;
+                drawSelectionCell(rect, (levelIndex + 1).toString(), depotColor, textColor, isMouseOverButton(rect));
+                if (isSolved) {
+                    ctx.strokeStyle = Settings.TITLE_COLOR;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4);
+                }
+            });
+        }
+
+        function drawGameScreen() {
+            drawGrid();
+            drawPaths();
+            drawCurrentPath();
+            drawDepots();
+            drawInvalidMoveFeedback();
+        }
+
+        function drawGrid() {
+            if (!level) return;
+            const { offsetX, offsetY, gridWidth, gridHeight, cellSize } = calculateGridDimensions();
+            ctx.fillStyle = Settings.GRID_BACKGROUND_COLOR;
+            ctx.fillRect(offsetX, offsetY, gridWidth, gridHeight);
+            ctx.strokeStyle = Settings.LINE_COLOR;
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= level.gridSize; i++) {
+                const yPos = offsetY + i * cellSize;
+                const xPos = offsetX + i * cellSize;
+                ctx.beginPath();
+                ctx.moveTo(offsetX, yPos);
+                ctx.lineTo(offsetX + gridWidth, yPos);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(xPos, offsetY);
+                ctx.lineTo(xPos, offsetY + gridHeight);
+                ctx.stroke();
+            }
+            ctx.strokeStyle = Settings.GRID_BORDER_COLOR;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(offsetX, offsetY, gridWidth, gridHeight);
+        }
+
+        function drawPaths() {
+            if (!level) return;
+            const { cellSize } = calculateGridDimensions();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            for (const depotId in paths) {
+                const path = paths[depotId];
+                if (path.length > 1) {
+                    const pathColor = Settings.PATH_COLORS[depotId % Settings.PATH_COLORS.length];
+                    ctx.strokeStyle = pathColor;
+                    ctx.lineWidth = Math.max(2, Math.min(Settings.PATH_LINE_WIDTH, cellSize * 0.1));
+                    ctx.shadowColor = pathColor;
+                    ctx.shadowBlur = 4;
+                    ctx.beginPath();
+                    for (let i = 0; i < path.length; i++) {
+                        const [x, y] = path[i];
+                        const cellRect = getCellRect(x, y);
+                        if (i === 0) ctx.moveTo(cellRect.centerX, cellRect.centerY);
+                        else ctx.lineTo(cellRect.centerX, cellRect.centerY);
+                    }
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+            }
+        }
+
+        function drawCurrentPath() {
+            if (!drawingPath || currentPath.length <= 1) return;
+            const { cellSize } = calculateGridDimensions();
+            const pathColor = Settings.PATH_COLORS[currentPathDepotId % Settings.PATH_COLORS.length];
+            ctx.strokeStyle = pathColor;
+            ctx.lineWidth = Math.max(2, Math.min(Settings.PATH_LINE_WIDTH, cellSize * 0.1));
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = pathColor;
+            ctx.shadowBlur = 4;
+            ctx.beginPath();
+            for (let i = 0; i < currentPath.length; i++) {
+                const [x, y] = currentPath[i];
+                const cellRect = getCellRect(x, y);
+                if (i === 0) ctx.moveTo(cellRect.centerX, cellRect.centerY);
+                else ctx.lineTo(cellRect.centerX, cellRect.centerY);
+            }
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawDepots() {
+            if (!level) return;
+            const { cellSize } = calculateGridDimensions();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (const depot of level.depots) {
+                const rect = getCellRect(depot.x, depot.y);
+                const depotColor = Settings.PATH_COLORS[depot.id % Settings.PATH_COLORS.length];
+                const padding = Math.floor(cellSize * 0.15);
+                const innerSize = rect.width - 2 * padding;
+                const borderRadius = Math.floor(cellSize * 0.08);
+
+                ctx.fillStyle = depotColor;
+                ctx.shadowColor = depotColor;
+                ctx.shadowBlur = (depot.id === currentPathDepotId && drawingPath) ? 8 + Math.sin(activeDepotPulse) * 2 : 4;
+                ctx.beginPath();
+                ctx.moveTo(rect.x + padding + borderRadius, rect.y + padding);
+                ctx.arcTo(rect.x + padding + innerSize, rect.y + padding, rect.x + padding + innerSize, rect.y + padding + borderRadius, borderRadius);
+                ctx.arcTo(rect.x + padding + innerSize, rect.y + padding + innerSize, rect.x + padding + innerSize - borderRadius, rect.y + padding + innerSize, borderRadius);
+                ctx.arcTo(rect.x + padding, rect.y + padding + innerSize, rect.x + padding, rect.y + padding + innerSize - borderRadius, borderRadius);
+                ctx.arcTo(rect.x + padding, rect.y + padding, rect.x + padding + borderRadius, rect.y + padding, borderRadius);
+                ctx.closePath();
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                const completedPath = paths[depot.id] || [];
+                let pipesPlaced = Math.max(0, completedPath.length - 1);
+                if (drawingPath && currentPathDepotId === depot.id) {
+                    pipesPlaced += Math.max(0, currentPath.length - 1);
+                }
+                const pipesRemaining = depot.n - pipesPlaced;
+
+                ctx.fillStyle = Settings.NUMBER_COLOR;
+                const fontSize = Math.max(12, Math.min(Settings.FONT_SIZE, Math.floor(cellSize * 0.5)));
+                ctx.font = `bold ${fontSize}px Roboto`;
+                ctx.fillText(pipesRemaining.toString(), rect.centerX, rect.centerY);
+            }
+        }
+
+        function drawInvalidMoveFeedback() {
+            if (!showInvalidMove || !invalidMovePos) return;
+            const [x, y] = invalidMovePos;
+            const rect = getCellRect(x, y);
+            ctx.fillStyle = Settings.INVALID_MOVE_COLOR;
+            ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+            playSound('invalid');
+        }
+
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.fillStyle = `rgba(${p.color}, ${p.opacity})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 30; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 3 + 1;
+                particles.push({
+                    x,
+                    y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 4 + 2,
+                    color: color,
+                    lifetime: 1200,
+                    maxLifetime: 1200,
+                    opacity: 1
+                });
+            }
+        }
+
+        function drawAllCompleteScreen() {
+            ctx.fillStyle = Settings.LEVEL_SOLVED_COLOR;
+            ctx.font = `bold ${Settings.LARGE_FONT_SIZE}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("ALL LEVELS COMPLETE!", canvas.width / 2, canvas.height * 0.3);
+            drawParticles();
+            ctx.fillStyle = Settings.TEXT_COLOR;
+            ctx.font = `${Settings.FONT_SIZE}px Roboto`;
+            ctx.fillText("Masterfully done!", canvas.width / 2, canvas.height * 0.5);
+            ctx.font = `${Settings.SMALL_FONT_SIZE}px Roboto`;
+            ctx.fillText("Click anywhere to return to the title screen", canvas.width / 2, canvas.height * 0.6);
+        }
+
+        function drawError(message) {
+            ctx.fillStyle = Settings.TEXT_COLOR;
+            ctx.font = `${Settings.FONT_SIZE}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`Error: ${message}`, canvas.width / 2, canvas.height / 2);
+        }
+
+        function drawButton(text, rect, isHovering) {
+            ctx.fillStyle = isHovering ? Settings.BUTTON_HOVER_COLOR : Settings.BUTTON_COLOR;
+            ctx.beginPath();
+            ctx.roundRect(rect.x, rect.y, rect.width, rect.height, 4);
+            ctx.fill();
+            ctx.strokeStyle = Settings.BUTTON_TEXT_COLOR;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillStyle = Settings.BUTTON_TEXT_COLOR;
+            ctx.font = `bold ${Settings.BUTTON_FONT_SIZE}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, rect.centerX, rect.centerY);
+        }
+
+        function drawSelectionCell(rect, text, bgColor, textColor, isHovering) {
+            ctx.fillStyle = bgColor;
+            ctx.beginPath();
+            ctx.roundRect(rect.x, rect.y, rect.width, rect.height, 4);
+            ctx.fill();
+            ctx.strokeStyle = Settings.SELECT_LINE_COLOR;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            if (isHovering) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.fill();
+            }
+            ctx.fillStyle = textColor;
+            const fontSize = Math.min(Settings.BUTTON_FONT_SIZE, rect.height * 0.4);
+            ctx.font = `bold ${fontSize}px Roboto`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, rect.centerX, rect.centerY);
+        }
+
+        function calculateGridDimensions() {
+            if (!level) return { offsetX: 0, offsetY: 0, gridWidth: 0, gridHeight: 0, screenOffsetX: 0, screenOffsetY: 0, cellSize: 0 };
+            const gridSize = level.gridSize;
+            const maxGridWidth = canvas.width - 2 * Settings.GRID_PADDING;
+            const totalButtonAreaHeight = Settings.BUTTON_AREA_HEIGHT + 60;
+            const topPadding = 30;
+            const maxGridHeight = canvas.height - 2 * Settings.GRID_PADDING - totalButtonAreaHeight - topPadding;
+            const maxCellSize = Math.min(maxGridWidth / gridSize, maxGridHeight / gridSize, 60);
+            const cellSize = Math.floor(maxCellSize);
+            const gridWidth = gridSize * cellSize;
+            const gridHeight = gridSize * cellSize;
+            const offsetX = Math.floor((canvas.width - gridWidth) / 2);
+            const offsetY = Math.floor(topPadding + (canvas.height - totalButtonAreaHeight - gridHeight - topPadding) / 2);
+            return {
+                offsetX,
+                offsetY,
+                gridWidth,
+                gridHeight,
+                screenOffsetX: offsetX - Settings.GRID_PADDING,
+                screenOffsetY: offsetY - Settings.GRID_PADDING,
+                cellSize
+            };
+        }
+
+        function getCellRect(x, y) {
+            if (!level) return { x: 0, y: 0, width: 0, height: 0, centerX: 0, centerY: 0 };
+            const { offsetX, offsetY, cellSize } = calculateGridDimensions();
+            const rectX = offsetX + x * cellSize;
+            const rectY = offsetY + y * cellSize;
+            return {
+                x: rectX,
+                y: rectY,
+                width: cellSize,
+                height: cellSize,
+                centerX: rectX + cellSize / 2,
+                centerY: rectY + cellSize / 2
+            };
+        }
+
+        function getCellCoords(pos) {
+            if (!level) return null;
+            const { offsetX, offsetY, gridWidth, gridHeight, cellSize } = calculateGridDimensions();
+            if (pos.x < offsetX || pos.x >= offsetX + gridWidth || pos.y < offsetY || pos.y >= offsetY + gridHeight) {
+                return null;
+            }
+            const x = Math.floor((pos.x - offsetX) / cellSize);
+            const y = Math.floor((pos.y - offsetY) / cellSize);
+            if (x >= 0 && x < level.gridSize && y >= 0 && y < level.gridSize) {
+                return [x, y];
+            }
+            return null;
+        }
+
+        function getDepotAt(x, y) {
+            if (!level) return null;
+            for (const depot of level.depots) {
+                if (depot.x === x && depot.y === y) return depot;
+            }
+            return null;
+        }
+
+        function updateMousePos(event) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            mousePos = {
+                x: (event.clientX - rect.left) * scaleX,
+                y: (event.clientY - rect.top) * scaleY
+            };
+        }
+
+        function handleMouseDown(event) {
+            const currentTime = Date.now();
+            if (currentTime - lastMouseDownTime < 100) return;
+            lastMouseDownTime = currentTime;
+            isMouseDown = true;
+            updateMousePos(event);
+            if (gameState === 'playing' && !levelSolved) {
+                const cell = getCellCoords(mousePos);
+                if (cell) {
+                    const [x, y] = cell;
+                    const clickedDepot = getDepotAt(x, y);
+                    if (clickedDepot) {
+                        if (!drawingPath) {
+                            startPathFromDepot(clickedDepot);
+                            playSound('select');
+                        }
+                    } else if (drawingPath) {
+                        handlePathDrawing(x, y);
+                    }
+                }
+            }
+        }
+
+        function handleMouseUp(event) {
+            if (!isMouseDown) return;
+            isMouseDown = false;
+            updateMousePos(event);
+            handleCanvasClick(mousePos);
+        }
+
+        function handleMouseMove(event) {
+            updateMousePos(event);
+            if (isMouseDown && gameState === 'playing' && drawingPath && !levelSolved) {
+                const cell = getCellCoords(mousePos);
+                if (cell) {
+                    const [x, y] = cell;
+                    const lastCell = currentPath[currentPath.length - 1];
+                    if (lastCell && (x !== lastCell[0] || y !== lastCell[1])) {
+                        handlePathDrawing(x, y);
+                    }
+                }
+            }
+        }
+
+        function handleCanvasClick(pos) {
+            switch (gameState) {
+                case "title_screen": handleTitleScreenClick(pos); break;
+                case "size_selection": handleSizeSelectionClick(pos); break;
+                case "level_selection": handleLevelSelectionClick(pos); break;
+                case "playing": handleGamePlayClick(pos); break;
+                case "game_over": handleAllCompleteClick(pos); break;
+            }
+        }
+
+        function handleTitleScreenClick(pos) {
+            if (Object.keys(levelsBySize).length === 0) return;
+            
+            // Handle size selection directly on title screen
+            const gridRows = 2;
+            const gridCols = 4;
+            const cellSize = Settings.SIZE_CELL_SIZE;
+            const spacing = Settings.SIZE_CELL_SPACING;
+            const gridWidth = gridCols * cellSize + (gridCols - 1) * spacing;
+            const startX = (canvas.width - gridWidth) / 2;
+            const startY = canvas.height * 0.5;
+            const sizes = Array.from({length: Settings.MAX_GRID_SIZE_SELECT - Settings.MIN_GRID_SIZE + 1}, (_, i) => Settings.MIN_GRID_SIZE + i);
+
+            sizes.forEach((size, i) => {
+                const row = Math.floor(i / gridCols);
+                const col = i % gridCols;
+                const x = startX + col * (cellSize + spacing);
+                const y = startY + row * (cellSize + spacing);
+                const rect = { x, y, width: cellSize, height: cellSize };
+                if (isMouseOverButton(rect) && levelsBySize[size]) {
+                    currentGridSize = size;
+                    currentLevelPage = 0;
+                    gameState = "level_selection";
+                    updateButtonStates();
+                }
+            });
+        }
+
+        function handleSizeSelectionClick(pos) {
+            const gridRows = 2;
+            const gridCols = 4;
+            const cellSize = Settings.SIZE_CELL_SIZE;
+            const spacing = Settings.SIZE_CELL_SPACING;
+            const gridWidth = gridCols * cellSize + (gridCols - 1) * spacing;
+            const startX = (canvas.width - gridWidth) / 2;
+            const startY = Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE + 20;
+            const sizes = Array.from({length: Settings.MAX_GRID_SIZE_SELECT - Settings.MIN_GRID_SIZE + 1}, (_, i) => Settings.MIN_GRID_SIZE + i);
+
+            sizes.forEach((size, i) => {
+                const row = Math.floor(i / gridCols);
+                const col = i % gridCols;
+                const x = startX + col * (cellSize + spacing);
+                const y = startY + row * (cellSize + spacing);
+                const rect = { x, y, width: cellSize, height: cellSize };
+                if (isMouseOverButton(rect) && levelsBySize[size]) {
+                    currentGridSize = size;
+                    currentLevelPage = 0;
+                    gameState = "level_selection";
+                    updateButtonStates();
+                }
+            });
+        }
+
+        function handleLevelSelectionClick(pos) {
+            const levelsForThisSize = levelsBySize[currentGridSize] || [];
+            const totalLevels = levelsForThisSize.length;
+            const startIndex = currentLevelPage * Settings.LEVELS_PER_PAGE;
+            const endIndex = Math.min(startIndex + Settings.LEVELS_PER_PAGE, totalLevels);
+            const levelsToShow = levelsForThisSize.slice(startIndex, endIndex);
+
+            // Fix: Use the same grid calculation as in draw function for consistency
+            const gridCols = Math.min(10, Math.ceil(Math.sqrt(levelsToShow.length)));
+            const gridRows = Math.ceil(levelsToShow.length / gridCols);
+            
+            const availableHeight = canvas.height - (Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE + 20 + Settings.BACK_BUTTON_HEIGHT + 20);
+            const availableWidth = canvas.width - 2 * Settings.SELECT_SCREEN_PADDING;
+            
+            const cellSize = Math.max(Settings.LEVEL_CELL_SIZE_MIN, Math.min(Settings.LEVEL_CELL_SIZE_MAX, Math.min(
+                availableWidth / gridCols,
+                availableHeight / gridRows
+            )));
+            
+            const spacing = Settings.LEVEL_CELL_SPACING;
+            const gridWidth = gridCols * cellSize + (gridCols - 1) * spacing;
+            const startX = (canvas.width - gridWidth) / 2;
+            const startY = Settings.SELECT_SCREEN_PADDING + Settings.LARGE_FONT_SIZE + 20;
+
+            // Check each level cell for clicks
+            for (let i = 0; i < levelsToShow.length; i++) {
+                const row = Math.floor(i / gridCols);
+                const col = i % gridCols;
+                const x = startX + col * (cellSize + spacing);
+                const y = startY + row * (cellSize + spacing);
+                const rect = { x, y, width: cellSize, height: cellSize };
+                
+                if (isMouseOverButton(rect)) {
+                    loadLevel(currentGridSize, startIndex + i);
+                    updateButtonStates();
+                    return; // Return after loading a level to prevent checking other cells
+                }
+            }
+        }
+
+        function handleGamePlayClick(pos, isRightClick = false) {
+            if (levelSolved) return;
+            const cell = getCellCoords(pos);
+            if (!cell) return;
+            const [x, y] = cell;
+            const clickedDepot = getDepotAt(x, y);
+            if (clickedDepot) {
+                if (isRightClick) {
+                    resetDepotPath(clickedDepot.id);
+                    playSound('reset');
+                    return;
+                }
+                startPathFromDepot(clickedDepot);
+                playSound('select');
+                return;
+            }
+            if (drawingPath) {
+                const currentDepot = level.depots.find(d => d.id === currentPathDepotId);
+                const maxPathLength = currentDepot.n + 1;
+                if (canDrawStraightLineTo(x, y)) {
+                    const lastCell = currentPath[currentPath.length - 1];
+                    const cellsToAdd = getCellsInStraightLine(lastCell[0], lastCell[1], x, y);
+                    if (currentPath.length + cellsToAdd.length > maxPathLength) {
+                        showInvalidMoveFeedback(x, y);
+                        return;
+                    }
+                    let allCellsValid = true;
+                    for (const [cellX, cellY] of cellsToAdd) {
+                        if (gridData[cellY][cellX] !== null) {
+                            allCellsValid = false;
+                            showInvalidMoveFeedback(cellX, cellY);
+                            break;
+                        }
+                    }
+                    if (allCellsValid) {
+                        for (const [cellX, cellY] of cellsToAdd) {
+                            addCellToPath(cellX, cellY);
+                            if (!drawingPath) break;
+                        }
+                    }
+                } else {
+                    handlePathDrawing(x, y);
+                }
+            }
+        }
+
+        function handleAllCompleteClick(pos) {
+            gameState = "title_screen";
+            allLevelsComplete = false;
+            updateButtonStates();
+        }
+
+        function canDrawStraightLineTo(targetX, targetY) {
+            if (!drawingPath || currentPath.length === 0) return false;
+            const [lastX, lastY] = currentPath[currentPath.length - 1];
+            return (lastX === targetX || lastY === targetY);
+        }
+
+        function getCellsInStraightLine(startX, startY, endX, endY) {
+            const cells = [];
+            if (startY === endY) {
+                const start = Math.min(startX, endX);
+                const end = Math.max(startX, endX);
+                for (let x = start; x <= end; x++) {
+                    if (x !== startX || startY !== endY) {
+                        cells.push([x, startY]);
+                    }
+                }
+            } else if (startX === endX) {
+                const start = Math.min(startY, endY);
+                const end = Math.max(startY, endY);
+                for (let y = start; y <= end; y++) {
+                    if (y !== startY || startX !== endX) {
+                        cells.push([startX, y]);
+                    }
+                }
+            }
+            if ((startX > endX && startY === endY) || (startY > endY && startX === endX)) {
+                cells.reverse();
+            }
+            return cells;
+        }
+
+        function loadLevel(size, indexInSize) {
+            if (!levelsBySize[size] || indexInSize < 0 || indexInSize >= levelsBySize[size].length) {
+                gameState = "level_selection";
+                currentGridSize = size;
+                level = null;
+                return false;
+            }
+            currentGridSize = size;
+            currentLevelIndexInSize = indexInSize;
+            level = levelsBySize[size][indexInSize];
+            document.title = `koro-koro`;
+            gridData = Array(level.gridSize).fill(null).map(() => Array(level.gridSize).fill(null));
+            paths = {};
+            level.depots.forEach(depot => {
+                paths[depot.id] = [[depot.x, depot.y]];
+                gridData[depot.y][depot.x] = depot.id;
+            });
+            drawingPath = false;
+            currentPathDepotId = -1;
+            currentPath = [];
+            levelSolved = false;
+            allLevelsComplete = false;
+            showInvalidMove = false;
+            invalidMoveTimer = 0;
+            invalidMovePos = null;
+            gameState = "playing";
+            updateButtonStates();
+            return true;
+        }
+
+        function loadDailyLevel(index) {
+            if (index < 0 || index >= dailyLevels.length) {
+                gameState = "title_screen";
+                dailyMode = false;
+                return;
+            }
+            level = dailyLevels[index];
+            currentGridSize = level.gridSize;
+            currentLevelIndexInSize = -1;
+            document.title = `koro-koro Daily`;
+            gridData = Array(level.gridSize).fill(null).map(() => Array(level.gridSize).fill(null));
+            paths = {};
+            level.depots.forEach(depot => {
+                paths[depot.id] = [[depot.x, depot.y]];
+                gridData[depot.y][depot.x] = depot.id;
+            });
+            drawingPath = false;
+            currentPathDepotId = -1;
+            currentPath = [];
+            levelSolved = false;
+            showInvalidMove = false;
+            invalidMoveTimer = 0;
+            invalidMovePos = null;
+            gameState = "playing";
+            updateButtonStates();
+        }
+
+        function resetLevel() {
+            if (dailyMode) {
+                loadDailyLevel(currentDailyIndex);
+            } else if (level) {
+                loadLevel(currentGridSize, currentLevelIndexInSize);
+            }
+            playSound('reset');
+        }
+
+        function isValidMove(x, y) {
+            if (!level || !currentPath.length) return false;
+            if (x < 0 || x >= level.gridSize || y < 0 || y >= level.gridSize) return false;
+            const [lastX, lastY] = currentPath[currentPath.length - 1];
+            const currentDepot = level.depots.find(d => d.id === currentPathDepotId);
+            const maxPathLength = currentDepot.n + 1;
+            if ((Math.abs(x - lastX) === 1 && y === lastY) || (Math.abs(y - lastY) === 1 && x === lastX)) {
+                return gridData[y][x] === null && currentPath.length < maxPathLength;
+            }
+            return false;
+        }
+
+        function handlePathDrawing(x, y) {
+            if (!drawingPath) return;
+            const targetDepot = getDepotAt(x, y);
+            if (targetDepot && !(targetDepot.x === currentPath[0][0] && targetDepot.y === currentPath[0][1])) {
+                showInvalidMoveFeedback(x, y);
+                return;
+            }
+            if (isValidMove(x, y)) {
+                addCellToPath(x, y);
+                playSound('path');
+            } else {
+                showInvalidMoveFeedback(x, y);
+            }
+        }
+
+        function addCellToPath(x, y) {
+            currentPath.push([x, y]);
+            gridData[y][x] = currentPathDepotId;
+            const currentDepot = level.depots.find(d => d.id === currentPathDepotId);
+            if (currentPath.length === currentDepot.n + 1) {
+                finalizePath();
+            }
+        }
+
+        function finalizePath() {
+            paths[currentPathDepotId] = [...currentPath];
+            drawingPath = false;
+            currentPathDepotId = -1;
+            currentPath = [];
+            if (checkWinCondition()) {
+                levelSolved = true;
+                levelSolvedTimer = Date.now();
+                gameState = "level_solved";
+                const levelKey = `${currentGridSize}_${currentLevelIndexInSize}`;
+                solvedLevels[levelKey] = true;
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                createParticles(centerX, centerY, Settings.LEVEL_SOLVED_COLOR);
+                playSound('win');
+                saveProgress();
+            }
+        }
+
+        function startPathFromDepot(depot) {
+            if (levelSolved) return;
+            
+            // Clear any existing path drawing state first
+            if (drawingPath && currentPathDepotId >= 0) {
+                resetDepotPath(currentPathDepotId);
+            }
+            
+            drawingPath = true;
+            currentPathDepotId = depot.id;
+            currentPath = [[depot.x, depot.y]];
+            
+            // Ensure this path is registered in the paths collection
+            paths[depot.id] = [[depot.x, depot.y]];
+        }
+
+        function resetDepotPath(depotId) {
+            // Check if depotId exists and is valid
+            if (depotId === undefined || depotId === null || depotId < 0) {
+                return;
+            }
+            
+            const existingPath = paths[depotId];
+            if (existingPath) {
+                for (let i = 1; i < existingPath.length; i++) {
+                    const [px, py] = existingPath[i];
+                    if (gridData[py][px] === depotId) {
+                        gridData[py][px] = null;
+                    }
+                }
+                
+                // Always make sure we have at least the depot point in the path
+                if (existingPath.length > 0) {
+                    paths[depotId] = [existingPath[0]];
+                }
+            }
+            
+            // If this is the active path, reset the drawing state
+            if (currentPathDepotId === depotId) {
+                drawingPath = false;
+                currentPath = [];
+                currentPathDepotId = -1;
+            }
+        }
+
+        function checkWinCondition() {
+            if (!level) return false;
+            let totalFilledCells = 0;
+            for (const depot of level.depots) {
+                const path = paths[depot.id] || [];
+                if (path.length !== depot.n + 1) return false;
+                totalFilledCells += path.length;
+            }
+            let gridFilledCount = 0;
+            for (let y = 0; y < level.gridSize; y++) {
+                for (let x = 0; x < level.gridSize; x++) {
+                    if (gridData[y][x] !== null) {
+                        gridFilledCount++;
+                    }
+                }
+            }
+            return gridFilledCount === level.gridSize * level.gridSize && totalFilledCells === gridFilledCount;
+        }
+
+        function findNextUnsolvedLevel(startSize, startIndexInSize) {
+            let searchSize = startSize;
+            let searchIndex = startIndexInSize + 1;
+            const sortedSizes = Object.keys(levelsBySize).map(Number).sort((a, b) => a - b);
+            let currentSizeIndex = sortedSizes.indexOf(searchSize);
+            if (currentSizeIndex === -1) return null;
+            while (currentSizeIndex < sortedSizes.length) {
+                searchSize = sortedSizes[currentSizeIndex];
+                const levelsInCurrentSize = levelsBySize[searchSize];
+                while (searchIndex < levelsInCurrentSize.length) {
+                    const levelKey = `${searchSize}_${searchIndex}`;
+                    if (!solvedLevels[levelKey]) {
+                        return { size: searchSize, indexInSize: searchIndex };
+                    }
+                    searchIndex++;
+                }
+                currentSizeIndex++;
+                searchIndex = 0;
+            }
+            return null;
+        }
+
+        function showInvalidMoveFeedback(x, y) {
+            showInvalidMove = true;
+            invalidMoveTimer = Date.now();
+            invalidMovePos = [x, y];
+        }
+
+        function playSound(type) {
+            console.log(`Sound: ${type}`);
+        }
+
+        function processDefaultLevels() {
+            loadGeneratedLevels()
+                .then(generatedLevels => {
+                    levelsBySize = {};
+                    generatedLevels.forEach(level => {
+                        const size = level.gridSize;
+                        if (!levelsBySize[size]) levelsBySize[size] = [];
+                        level.indexInSize = levelsBySize[size].length;
+                        levelsBySize[size].push(level);
+                    });
+                })
+                .catch(error => {
+                    console.error("Error loading levels:", error);
+                    const defaultLevels = getDefaultLevels();
+                    levelsBySize = {};
+                    defaultLevels.forEach(level => {
+                        const size = level.gridSize;
+                        if (!levelsBySize[size]) levelsBySize[size] = [];
+                        level.indexInSize = levelsBySize[size].length;
+                        levelsBySize[size].push(level);
+                    });
+                });
+        }
+
+        async function loadGeneratedLevels() {
+            const levelFiles = ['5x5.json', '6x6.json', '7x7.json', '8x8.json', '9x9.json', '10x10.json', '11x11.json', '12x12.json'];
+            let allLevels = [];
+            const promises = levelFiles.map(file => {
+                const filePath = `${Settings.GENERATED_LEVEL_DIR}/${file}`;
+                return fetch(filePath)
+                    .then(response => response.ok ? response.json() : { levels: [] })
+                    .then(levelsData => {
+                        if (levelsData.levels && Array.isArray(levelsData.levels)) {
+                            return levelsData.levels.map((levelData, index) => {
+                                const depots = levelData.depots.map((depot, depotIndex) => {
+                                    return new Depot(depot.x, depot.y, depot.n, depot.id !== undefined ? depot.id : depotIndex);
+                                });
+                                return new Level(levelData.name || `${file.replace('.json', '')} Level ${index+1}`, levelData.grid_size, depots);
+                            });
+                        }
+                        return [];
+                    })
+                    .catch(error => {
+                        console.error(`Error loading ${file}:`, error);
+                        return [];
+                    });
+            });
+            const results = await Promise.all(promises);
+            results.forEach(levels => allLevels = allLevels.concat(levels));
+            return allLevels;
+        }
+
+        
+        function saveProgress() {
+            if (currentGridSize === -1 || currentLevelIndexInSize === -1) return;
+            if (levelSolved || gameState === 'level_solved') {
+                const levelKey = `${currentGridSize}_${currentLevelIndexInSize}`;
+                if (!solvedLevels[levelKey]) {
+                    solvedLevels[levelKey] = true;
+                    try {
+                        // Try localStorage first (better storage limits, no network overhead)
+                        if (typeof Storage !== "undefined" && localStorage) {
+                            localStorage.setItem(Settings.COOKIE_NAME, JSON.stringify(solvedLevels));
+                        } else {
+                            // Fallback to cookies if localStorage not available
+                            setCookie(Settings.COOKIE_NAME, JSON.stringify(solvedLevels), 365);
+                        }
+                    } catch (e) {
+                        console.error("Error saving progress:", e);
+                        // Try cookie fallback if localStorage fails
+                        try {
+                            setCookie(Settings.COOKIE_NAME, JSON.stringify(solvedLevels), 365);
+                        } catch (cookieError) {
+                            console.error("Error saving progress to cookies:", cookieError);
+                        }
+                    }
+                }
+            }
+        }
+
+        function loadProgress() {
+            try {
+                let progressString = null;
+                
+                // Try localStorage first
+                if (typeof Storage !== "undefined" && localStorage) {
+                    progressString = localStorage.getItem(Settings.COOKIE_NAME);
+                }
+                
+                // Fallback to cookies if localStorage is empty or unavailable
+                if (!progressString) {
+                    progressString = getCookie(Settings.COOKIE_NAME);
+                    
+                    // If we found data in cookies but localStorage is available, migrate it
+                    if (progressString && typeof Storage !== "undefined" && localStorage) {
+                        try {
+                            localStorage.setItem(Settings.COOKIE_NAME, progressString);
+                        } catch (e) {
+                            console.warn("Could not migrate progress to localStorage:", e);
+                        }
+                    }
+                }
+                
+                if (progressString) {
+                    const loaded = JSON.parse(progressString);
+                    if (typeof loaded === 'object' && loaded !== null) {
+                        solvedLevels = loaded;
+                    } else {
+                        solvedLevels = {};
+                    }
+                } else {
+                    solvedLevels = {};
+                }
+            } catch (e) {
+                console.error("Error loading progress:", e);
+                solvedLevels = {};
+            }
+        }
+
+        function setCookie(name, value, days) {
+            let expires = "";
+            if (days) {
+                const date = new Date();
+                date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                expires = "; expires=" + date.toUTCString();
+            }
+            try {
+                document.cookie = name + "=" + (encodeURIComponent(value) || "") + expires + "; path=/; SameSite=Lax";
+            } catch (e) {
+                console.error("Failed to set cookie:", e);
+            }
+        }
+
+        function getCookie(name) {
+            const nameEQ = name + "=";
+            try {
+                const ca = document.cookie.split(';');
+                for (let i = 0; i < ca.length; i++) {
+                    let c = ca[i];
+                    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                    if (c.indexOf(nameEQ) === 0) {
+                        return decodeURIComponent(c.substring(nameEQ.length, c.length));
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to get cookie:", e);
+            }
+            return null;
+        }
+
+        function isMouseOverButton(rect) {
+            return mousePos.x >= rect.x && mousePos.x <= rect.x + rect.width &&
+                   mousePos.y >= rect.y && mousePos.y <= rect.y + rect.height;
+        }
+
+        function updateButtonStates() {
+            const backButton = document.getElementById('back-btn');
+            const restartButton = document.getElementById('restart-btn');
+            const prevPageButton = document.getElementById('prev-page-btn');
+            const nextPageButton = document.getElementById('next-page-btn');
+
+            switch (gameState) {
+                case "title_screen":
+                    backButton.style.display = 'none';
+                    restartButton.style.display = 'none';
+                    prevPageButton.style.display = 'none';
+                    nextPageButton.style.display = 'none';
+                    break;
+                case "size_selection":
+                    backButton.style.display = 'inline-block';
+                    backButton.textContent = 'Back';
+                    restartButton.style.display = 'none';
+                    prevPageButton.style.display = 'none';
+                    nextPageButton.style.display = 'none';
+                    break;
+                case "level_selection":
+                    backButton.style.display = 'inline-block';
+                    backButton.textContent = 'Back';
+                    restartButton.style.display = 'none';
+                    const levelsForThisSize = levelsBySize[currentGridSize] || [];
+                    const totalLevels = levelsForThisSize.length;
+                    const maxPages = Math.ceil(totalLevels / Settings.LEVELS_PER_PAGE);
+                    prevPageButton.style.display = currentLevelPage > 0 ? 'inline-block' : 'none';
+                    nextPageButton.style.display = currentLevelPage < maxPages - 1 ? 'inline-block' : 'none';
+                    break;
+                case "playing":
+                case "level_solved":
+                    backButton.style.display = 'inline-block';
+                    backButton.textContent = 'Back';
+                    restartButton.style.display = 'inline-block';
+                    restartButton.textContent = 'Restart';
+                    prevPageButton.style.display = 'none';
+                    nextPageButton.style.display = 'none';
+                    break;
+                case "game_over":
+                    backButton.style.display = 'inline-block';
+                    backButton.textContent = 'Title';
+                    restartButton.style.display = 'none';
+                    prevPageButton.style.display = 'none';
+                    nextPageButton.style.display = 'none';
+                    break;
+                default:
+                    backButton.style.display = 'none';
+                    restartButton.style.display = 'none';
+                    prevPageButton.style.display = 'none';
+                    nextPageButton.style.display = 'none';
+            }
+        }
+
+        function handleBackButton() {
+            switch (gameState) {
+                case "size_selection":
+                    gameState = "title_screen";
+                    dailyMode = false;
+                    currentGridSize = -1;
+                    break;
+                case "level_selection":
+                    gameState = "title_screen";  // Go directly to title screen instead of size_selection
+                    currentGridSize = -1;
+                    currentLevelPage = 0;
+                    break;
+                case "playing":
+                case "level_solved":
+                    if (drawingPath) resetDepotPath(currentPathDepotId);
+                    if (dailyMode) {
+                        gameState = "title_screen";
+                        dailyMode = false;
+                        currentDailyIndex = 0;
+                        level = null;
+                    } else {
+                        gameState = "level_selection";
+                        level = null;
+                    }
+                    break;
+                case "game_over":
+                    gameState = "title_screen";
+                    allLevelsComplete = false;
+                    break;
+            }
+            updateButtonStates();
+        }
+
+        function handleRestartButton() {
+            if (gameState === "playing" || gameState === "level_solved") {
+                resetLevel();
+            }
+        }
+
+        function handleKeyDown(event) {
+            if (gameState === 'playing' && drawingPath && event.key.toLowerCase() === 'z') {
+                undoLastPathSegment();
+            }
+        }
+
+        function undoLastPathSegment() {
+            if (!drawingPath || currentPath.length <= 1) return;
+            
+            const [x, y] = currentPath[currentPath.length - 1];
+            gridData[y][x] = null;
+            currentPath.pop();
+            
+            // If we're back to just the depot, reset the path
+            if (currentPath.length === 1) {
+                // Don't reset the path - just keep the depot selected
+                // drawingPath = false;
+                // currentPath = [];
+                // currentPathDepotId = -1;
+            }
+            
+            playSound('reset');
+        }
+
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
