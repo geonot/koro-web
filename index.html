@@ -203,7 +203,7 @@
             ctx.imageSmoothingEnabled = false;
 
             loadLogo();
-            loadProgress();
+            loadProgress(); // Load saved progress before processing levels
             processDefaultLevels();
 
             canvas.addEventListener('mousedown', handleMouseDown);
@@ -1233,28 +1233,24 @@
 
         
         function saveProgress() {
-            if (currentGridSize === -1 || currentLevelIndexInSize === -1) return;
-            if (levelSolved || gameState === 'level_solved') {
-                const levelKey = `${currentGridSize}_${currentLevelIndexInSize}`;
-                if (!solvedLevels[levelKey]) {
-                    solvedLevels[levelKey] = true;
-                    try {
-                        // Try localStorage first (better storage limits, no network overhead)
-                        if (typeof Storage !== "undefined" && localStorage) {
-                            localStorage.setItem(Settings.COOKIE_NAME, JSON.stringify(solvedLevels));
-                        } else {
-                            // Fallback to cookies if localStorage not available
-                            setCookie(Settings.COOKIE_NAME, JSON.stringify(solvedLevels), 365);
-                        }
-                    } catch (e) {
-                        console.error("Error saving progress:", e);
-                        // Try cookie fallback if localStorage fails
-                        try {
-                            setCookie(Settings.COOKIE_NAME, JSON.stringify(solvedLevels), 365);
-                        } catch (cookieError) {
-                            console.error("Error saving progress to cookies:", cookieError);
-                        }
-                    }
+            try {
+                // Always save the current solvedLevels object, regardless of current game state
+                if (typeof Storage !== "undefined" && localStorage) {
+                    localStorage.setItem(Settings.COOKIE_NAME, JSON.stringify(solvedLevels));
+                    console.log("Progress saved to localStorage:", Object.keys(solvedLevels).length, "levels");
+                } else {
+                    // Fallback to cookies if localStorage not available
+                    setCookie(Settings.COOKIE_NAME, JSON.stringify(solvedLevels), 365);
+                    console.log("Progress saved to cookies:", Object.keys(solvedLevels).length, "levels");
+                }
+            } catch (e) {
+                console.error("Error saving progress:", e);
+                // Try cookie fallback if localStorage fails
+                try {
+                    setCookie(Settings.COOKIE_NAME, JSON.stringify(solvedLevels), 365);
+                    console.log("Progress saved to cookies (fallback):", Object.keys(solvedLevels).length, "levels");
+                } catch (cookieError) {
+                    console.error("Error saving progress to cookies:", cookieError);
                 }
             }
         }
