@@ -362,6 +362,41 @@
                 const textColor = hasLevels ? Settings.BUTTON_TEXT_COLOR : Settings.SELECT_DEPOT_TEXT_COLOR_UNSOLVED;
                 drawSelectionCell(rect, sizeLabel, depotColor, textColor, isMouseOverButton(rect));
             });
+
+            // Display Rules and Controls
+            const rulesAndControlsStartY = startY + (gridRows * cellSize) + ((gridRows - 1) * spacing) + 40; // Position below the size grid
+
+            ctx.fillStyle = Settings.TEXT_COLOR;
+            ctx.font = `bold ${Settings.SMALL_FONT_SIZE + 2}px Roboto`; // Slightly larger bold for headers
+            ctx.textAlign = 'center';
+
+            let currentY = rulesAndControlsStartY;
+            const lineSpacing = Settings.SMALL_FONT_SIZE + 6; // Spacing between lines
+
+            ctx.fillText("How to Play:", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+
+            ctx.font = `${Settings.SMALL_FONT_SIZE}px Roboto`; // Regular for content
+
+            ctx.fillText("Connect matching depot pairs with paths.", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+            ctx.fillText("Path length must match the number on its depots.", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+            ctx.fillText("Fill the entire grid. No empty cells.", canvas.width / 2, currentY);
+            currentY += lineSpacing * 1.5; // Extra spacing before next section
+
+            ctx.font = `bold ${Settings.SMALL_FONT_SIZE + 2}px Roboto`; // Bold for header
+            ctx.fillText("Controls:", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+
+            ctx.font = `${Settings.SMALL_FONT_SIZE}px Roboto`; // Regular for content
+            ctx.fillText("Left Click Depot: Start/Switch path.", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+            ctx.fillText("Left Click Cell: Extend current path.", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+            ctx.fillText("Right Click Depot (or Context Menu): Clear depot's path.", canvas.width / 2, currentY);
+            currentY += lineSpacing;
+            ctx.fillText("'Z' Key: Undo last path segment.", canvas.width / 2, currentY);
         }
 
         function drawSizeSelectionScreen() {
@@ -540,7 +575,7 @@
 
                 ctx.fillStyle = depotColor;
                 ctx.shadowColor = depotColor;
-                ctx.shadowBlur = (depot.id === currentPathDepotId && drawingPath) ? 8 + Math.sin(activeDepotPulse) * 2 : 4;
+                ctx.shadowBlur = (depot.id === currentPathDepotId) ? 12 + Math.sin(activeDepotPulse) * 4 : 5;
                 ctx.beginPath();
                 ctx.moveTo(rect.x + padding + borderRadius, rect.y + padding);
                 ctx.arcTo(rect.x + padding + innerSize, rect.y + padding, rect.x + padding + innerSize, rect.y + padding + borderRadius, borderRadius);
@@ -553,6 +588,32 @@
                 ctx.strokeStyle = "#ffffff";
                 ctx.lineWidth = 1;
                 ctx.stroke();
+
+                // NEW: Add extra highlight for selected depot
+                if (depot.id === currentPathDepotId) {
+                    ctx.strokeStyle = depotColor; // Use depot's own color
+                    ctx.lineWidth = 2; // A bit thicker for the highlight
+                    ctx.globalAlpha = 0.5 + Math.sin(activeDepotPulse) * 0.3; // Pulsating alpha (0.2 to 0.8)
+
+                    // Calculate geometry for the outline, slightly larger than the main depot shape
+                    const outlineOffset = 3; // How much larger the outline is
+                    const outlinePadding = padding - outlineOffset;
+                    // Ensure borderRadius is not larger than half the smallest dimension of the outline path segment
+                    const tempOutlineInnerSize = rect.width - 2 * outlinePadding; // rect.width should be cellSize here
+                    const actualBorderRadius = Math.min(borderRadius, tempOutlineInnerSize / 2);
+
+                    ctx.beginPath();
+                    ctx.moveTo(rect.x + outlinePadding + actualBorderRadius, rect.y + outlinePadding);
+                    ctx.arcTo(rect.x + outlinePadding + tempOutlineInnerSize, rect.y + outlinePadding, rect.x + outlinePadding + tempOutlineInnerSize, rect.y + outlinePadding + actualBorderRadius, actualBorderRadius);
+                    ctx.arcTo(rect.x + outlinePadding + tempOutlineInnerSize, rect.y + outlinePadding + tempOutlineInnerSize, rect.x + outlinePadding + tempOutlineInnerSize - actualBorderRadius, rect.y + outlinePadding + tempOutlineInnerSize, actualBorderRadius);
+                    ctx.arcTo(rect.x + outlinePadding, rect.y + outlinePadding + tempOutlineInnerSize, rect.x + outlinePadding, rect.y + outlinePadding + tempOutlineInnerSize - actualBorderRadius, actualBorderRadius);
+                    ctx.arcTo(rect.x + outlinePadding, rect.y + outlinePadding, rect.x + outlinePadding + actualBorderRadius, rect.y + outlinePadding, actualBorderRadius);
+                    ctx.closePath();
+                    ctx.stroke();
+
+                    ctx.globalAlpha = 1.0; // Reset global alpha
+                    // ctx.lineWidth will be reset by the main depot stroke or text drawing later, or set explicitly if needed
+                }
 
                 const completedPath = paths[depot.id] || [];
                 let pipesPlaced = Math.max(0, completedPath.length - 1);
@@ -744,11 +805,11 @@
                     const [x, y] = cell;
                     const clickedDepot = getDepotAt(x, y);
                     if (clickedDepot) {
-                        if (!drawingPath) {
-                            startPathFromDepot(clickedDepot);
-                            playSound('select');
-                        }
-                    } else if (drawingPath) {
+                        // startPathFromDepot will now handle all logic for saving previous state
+                        // or loading new state, or continuing the current path.
+                        startPathFromDepot(clickedDepot);
+                        playSound('select');
+                    } else if (drawingPath) { // Clicked a non-depot cell while drawing
                         handlePathDrawing(x, y);
                     }
                 }
@@ -1085,45 +1146,91 @@
 
         function startPathFromDepot(depot) {
             if (levelSolved) return;
-            
-            // Clear any existing path drawing state first
-            if (drawingPath && currentPathDepotId >= 0) {
-                resetDepotPath(currentPathDepotId);
+
+            const newClickedDepotId = depot.id;
+            const previouslyActiveDepotId = currentPathDepotId; // Store before it's changed
+
+            // Case 1: A different path was being actively drawn.
+            // (drawingPath was true, there was a previouslyActiveDepotId, and it's not the one we just clicked)
+            if (drawingPath && previouslyActiveDepotId !== -1 && previouslyActiveDepotId !== newClickedDepotId) {
+                if (currentPath && currentPath.length > 0) {
+                    paths[previouslyActiveDepotId] = [...currentPath]; // Save progress of the old path
+                }
+                // Now, load the path for the newClickedDepotId
+                if (paths[newClickedDepotId] && paths[newClickedDepotId].length > 0) {
+                    currentPath = [...paths[newClickedDepotId]];
+                } else {
+                    currentPath = [[depot.x, depot.y]];
+                    paths[newClickedDepotId] = [[depot.x, depot.y]]; // Initialize in paths object if new
+                }
             }
-            
+            // Case 2: No path was active, OR the clicked depot was the same as previously active but drawingPath was false (inactive),
+            // OR it's a new depot selection and no other path was active.
+            // Essentially, if we are not continuing an already active drawing for the *same* depot.
+            else if (previouslyActiveDepotId !== newClickedDepotId || !drawingPath) {
+                // Load or reload path for newClickedDepotId
+                if (paths[newClickedDepotId] && paths[newClickedDepotId].length > 0) {
+                    currentPath = [...paths[newClickedDepotId]];
+                } else {
+                    currentPath = [[depot.x, depot.y]];
+                    paths[newClickedDepotId] = [[depot.x, depot.y]]; // Initialize in paths object if new
+                }
+            }
+            // Case 3 (implicit): Clicked the same depot that was already active (previouslyActiveDepotId === newClickedDepotId AND drawingPath was true).
+            // In this scenario, currentPath already holds the live drawing progress, so we don't modify it here.
+
+            // Update global state: the clicked depot is now the active one for drawing.
+            currentPathDepotId = newClickedDepotId;
             drawingPath = true;
-            currentPathDepotId = depot.id;
-            currentPath = [[depot.x, depot.y]];
-            
-            // Ensure this path is registered in the paths collection
-            paths[depot.id] = [[depot.x, depot.y]];
         }
 
         function resetDepotPath(depotId) {
-            // Check if depotId exists and is valid
             if (depotId === undefined || depotId === null || depotId < 0) {
                 return;
             }
-            
-            const existingPath = paths[depotId];
-            if (existingPath) {
-                for (let i = 1; i < existingPath.length; i++) {
-                    const [px, py] = existingPath[i];
-                    if (gridData[py][px] === depotId) {
+
+            const depotInfo = level.depots.find(d => d.id === depotId);
+
+            // Clear cells from the finalized path stored in paths[depotId]
+            const finalizedPath = paths[depotId];
+            if (finalizedPath) {
+                for (let i = 1; i < finalizedPath.length; i++) { // Start from 1 to keep the depot itself
+                    const [px, py] = finalizedPath[i];
+                    // Check grid bounds and if the cell actually belongs to this depot before nullifying
+                    if (gridData[py] && gridData[py][px] === depotId) {
                         gridData[py][px] = null;
                     }
                 }
-                
-                // Always make sure we have at least the depot point in the path
-                if (existingPath.length > 0) {
-                    paths[depotId] = [existingPath[0]];
+                // Reset the finalized path to just the depot's starting point
+                if (depotInfo) {
+                     paths[depotId] = [[depotInfo.x, depotInfo.y]];
+                } else {
+                    delete paths[depotId];
+                }
+            }
+
+            // If this depot's path is also the one currently being actively drawn (currentPath),
+            // clear its cells from gridData.
+            if (currentPathDepotId === depotId && currentPath) {
+                for (let i = 1; i < currentPath.length; i++) { // Start from 1 to keep the depot itself
+                    const [cx, cy] = currentPath[i];
+                    // Check grid bounds and if the cell actually belongs to this depot
+                    if (gridData[cy] && gridData[cy][cx] === depotId) {
+                        gridData[cy][cx] = null;
+                    }
                 }
             }
             
-            // If this is the active path, reset the drawing state
+            // If the path being reset is the one currently active for drawing:
+            // 1. Reset currentPath to only contain the depot's starting coordinates.
+            // 2. Set drawingPath to false and currentPathDepotId to -1.
             if (currentPathDepotId === depotId) {
+                if (depotInfo) {
+                    currentPath = [[depotInfo.x, depotInfo.y]];
+                } else {
+                     currentPath = [];
+                }
                 drawingPath = false;
-                currentPath = [];
                 currentPathDepotId = -1;
             }
         }
