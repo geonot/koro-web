@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>koro-koro</title>
+    <title>koro koro</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
@@ -322,7 +322,7 @@
                 ctx.font = `bold ${Settings.LARGE_FONT_SIZE}px Roboto`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText("koro-koro", canvas.width / 2, canvas.height * 0.2);
+                ctx.fillText("koro koro", canvas.width / 2, canvas.height * 0.2);
             }
 
             if (Object.keys(levelsBySize).length === 0) {
@@ -332,12 +332,6 @@
                 return;
             }
 
-            // Draw "Select Size" title
-            ctx.fillStyle = Settings.TITLE_COLOR;
-            ctx.font = `bold ${Math.floor(Settings.LARGE_FONT_SIZE * 0.7)}px Roboto`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText("Select Size", canvas.width / 2, canvas.height * 0.4);
 
             // Draw size selection grid directly on title screen
             const gridRows = 2;
@@ -378,25 +372,10 @@
 
             ctx.font = `${Settings.SMALL_FONT_SIZE}px Roboto`; // Regular for content
 
-            ctx.fillText("Connect matching depot pairs with paths.", canvas.width / 2, currentY);
+            ctx.fillText("Place pipes into adjacent tiles starting from depots.", canvas.width / 2, currentY);
             currentY += lineSpacing;
-            ctx.fillText("Path length must match the number on its depots.", canvas.width / 2, currentY);
-            currentY += lineSpacing;
-            ctx.fillText("Fill the entire grid. No empty cells.", canvas.width / 2, currentY);
+            ctx.fillText("Pipe the entire grid without overlapping pipes.", canvas.width / 2, currentY);
             currentY += lineSpacing * 1.5; // Extra spacing before next section
-
-            ctx.font = `bold ${Settings.SMALL_FONT_SIZE + 2}px Roboto`; // Bold for header
-            ctx.fillText("Controls:", canvas.width / 2, currentY);
-            currentY += lineSpacing;
-
-            ctx.font = `${Settings.SMALL_FONT_SIZE}px Roboto`; // Regular for content
-            ctx.fillText("Left Click Depot: Start/Switch path.", canvas.width / 2, currentY);
-            currentY += lineSpacing;
-            ctx.fillText("Left Click Cell: Extend current path.", canvas.width / 2, currentY);
-            currentY += lineSpacing;
-            ctx.fillText("Right Click Depot (or Context Menu): Clear depot's path.", canvas.width / 2, currentY);
-            currentY += lineSpacing;
-            ctx.fillText("'Z' Key: Undo last path segment.", canvas.width / 2, currentY);
         }
 
         function drawSizeSelectionScreen() {
@@ -615,12 +594,17 @@
                     // ctx.lineWidth will be reset by the main depot stroke or text drawing later, or set explicitly if needed
                 }
 
+                // Fix: Calculate pipes placed more accurately to prevent negative numbers
                 const completedPath = paths[depot.id] || [];
                 let pipesPlaced = Math.max(0, completedPath.length - 1);
-                if (drawingPath && currentPathDepotId === depot.id) {
-                    pipesPlaced += Math.max(0, currentPath.length - 1);
+                
+                // Only add current path progress if this depot is actively being drawn AND 
+                // the current path is longer than the completed path
+                if (drawingPath && currentPathDepotId === depot.id && currentPath.length > completedPath.length) {
+                    pipesPlaced = Math.max(0, currentPath.length - 1);
                 }
-                const pipesRemaining = depot.n - pipesPlaced;
+                
+                const pipesRemaining = Math.max(0, depot.n - pipesPlaced);
 
                 ctx.fillStyle = Settings.NUMBER_COLOR;
                 const fontSize = Math.max(12, Math.min(Settings.FONT_SIZE, Math.floor(cellSize * 0.5)));
@@ -805,6 +789,12 @@
                     const [x, y] = cell;
                     const clickedDepot = getDepotAt(x, y);
                     if (clickedDepot) {
+                        // Check if this is a right-click (button 2)
+                        if (event.button === 2) {
+                            resetDepotPath(clickedDepot.id);
+                            playSound('reset');
+                            return;
+                        }
                         // startPathFromDepot will now handle all logic for saving previous state
                         // or loading new state, or continuing the current path.
                         startPathFromDepot(clickedDepot);
@@ -1033,7 +1023,7 @@
             currentGridSize = size;
             currentLevelIndexInSize = indexInSize;
             level = levelsBySize[size][indexInSize];
-            document.title = `koro-koro`;
+            document.title = `koro koro`;
             gridData = Array(level.gridSize).fill(null).map(() => Array(level.gridSize).fill(null));
             paths = {};
             level.depots.forEach(depot => {
@@ -1062,7 +1052,7 @@
             level = dailyLevels[index];
             currentGridSize = level.gridSize;
             currentLevelIndexInSize = -1;
-            document.title = `koro-koro Daily`;
+            document.title = `koro koro`;
             gridData = Array(level.gridSize).fill(null).map(() => Array(level.gridSize).fill(null));
             paths = {};
             level.depots.forEach(depot => {
